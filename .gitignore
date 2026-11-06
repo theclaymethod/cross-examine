@@ -1,10 +1,10 @@
 __pycache__/
-evals/wargames/.scratch/
+evals/cross-examine/.scratch/
 eval-runs/
 .DS_Store
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
-evals/wargames/calibration-output/
-evals/wargames/prepared-cases/
+evals/cross-examine/calibration-output/
+evals/cross-examine/prepared-cases/

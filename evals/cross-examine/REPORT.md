@@ -1,4 +1,4 @@
-# Wargaming the wargames evals
+# Cross-examining the evals
 
 This is the historical development report. The later [intent review](INTENT_REVIEW.md) identifies gaps in its executable proxy and qualifies the pilot as development and near-transfer evidence. The [ledger](LEDGER.md) records corrections and open limitations; original results below retain their historical versions.
 
@@ -34,6 +34,6 @@ The pilot agents had unrestricted host tools with explicit path restrictions; th
 
 ## Persisted lessons
 
-The pilot updated its supplied `generator/SKILL.md`, and the transfer stage consumed that exact document. Confirmed reset, report-contract, and control-design lessons were also added to `~/.codex/skills/wargames/references/lessons.md`, routed from the skill entrypoint. The skill validator passed.
+The pilot updated its supplied `generator/SKILL.md`, and the transfer stage consumed that exact document. Confirmed reset, report-contract, and control-design lessons were also added to the original `~/.codex/skills/wargames/references/lessons.md` (now `~/.codex/skills/cross-examine/references/lessons.md`), routed from the skill entrypoint. The skill validator passed.
 
 Run instructions and grading boundaries are in [README.md](README.md). Generate neutral case directories with `run.py prepare`; keep their operator manifest out of candidate context. Machine-specific paths in published evidence are replaced with `<repo>`.

@@ -8,7 +8,7 @@ Why: Initialization trusted the structural validity of state controlled by the p
 
 Generate instead: For fully disposable state, reconstruct from evaluator-owned fixture data. Exercise reset after completed, partial, empty, and structurally invalid states. Preserve application-owned data when the task requires it; reconstruction is appropriate only for state the eval owns and may discard.
 
-Evidence: The [eval suite](https://github.com/theclaymethod/wargames/tree/main/evals/wargames) records the original failure in `evidence/model-audit-01/submission/finding.json`. Fixture version 2 reconstructs disposable state; `run.py` and `transfer.py` replay corrupt-state recovery for submitted resets.
+Evidence: The [eval suite](https://github.com/theclaymethod/cross-examine/tree/main/evals/cross-examine) records the original failure in `evidence/model-audit-01/submission/finding.json`. Fixture version 2 reconstructs disposable state; `run.py` and `transfer.py` replay corrupt-state recovery for submitted resets.
 
 ## Match report validation to the declared contract
 

@@ -1,6 +1,6 @@
 # Maintain the reward-hacking ledger
 
-Keep a project-owned record of the mechanisms encountered and the evidence that a prevention works. Use an existing eval ledger when present; otherwise create `WARGAMES_LEDGER.md` beside the eval. Keep reusable generation rules in the generator skill or lessons reference, linking to ledger evidence rather than duplicating the incident history.
+Keep a project-owned record of the mechanisms encountered and the evidence that a prevention works. Use an existing eval ledger when present; otherwise create `CROSS_EXAMINE_LEDGER.md` beside the eval. Keep reusable generation rules in the generator skill or lessons reference, linking to ledger evidence rather than duplicating the incident history.
 
 Use Markdown on local disk by default; no database or service is required for this ledger. Record the chosen runtime, storage, isolation boundary, and why any heavier tool is necessary. Distinguish enforced access restrictions from instructions given to a host process.
 

@@ -1,8 +1,10 @@
-# Evaluating `$wargames`
+# Evaluating `$cross-examine`
 
 This suite checks whether an audit can reproduce an evaluation defect, repair its cause without rejecting legitimate outcomes, and teach a generator a useful lesson. It also includes controls where the auditor should avoid inventing defects. All tasks use synthetic local data; they require no secrets or live services.
 
 The runnable checks grade submitted artifacts. A reviewer must also assess the audit reasoning and lesson quality. Passing the executable checks alone is not a complete skill-evaluation result.
+
+Historical evidence preserves the original `wargames` names and settings. Replay a historical run from its recorded commit. The rename introduces grader version 6 and fixture version 4; current commands use the names below.
 
 ## Setup and calibration
 
@@ -12,7 +14,7 @@ Use Python 3.11 or newer with standard-library SQLite serialization support. Loc
 python3 calibration.py /absolute/path/to/calibration-output
 ```
 
-Calibration runs reference submissions through the grading machinery. Inspect the generated results before using the suite. It establishes that the fixtures and grader behave as expected for those submissions; it does not measure whether a model using `$wargames` discovers the flaws or produces good lessons.
+Calibration runs reference submissions through the grading machinery. Inspect the generated results before using the suite. It establishes that the fixtures and grader behave as expected for those submissions; it does not measure whether a model using `$cross-examine` discovers the flaws or produces good lessons.
 
 ## Choose the execution boundary
 
@@ -21,13 +23,13 @@ The default `local` executor runs Python subprocesses in fresh directories. Use 
 For untrusted programs or permission-dependent checks, use an existing adequate sandbox or the optional Docker executor:
 
 ```bash
-docker build -t wargames-evals:local .
+docker build -t cross-examine-evals:local .
 python3 calibration.py /absolute/path/to/container-calibration --executor docker
 python3 run.py grade verifier-bypass /absolute/path/to/submission --executor docker
 python3 transfer.py grade /absolute/path/to/transfer-output --executor docker
 ```
 
-`WARGAMES_EXECUTOR=local|docker` sets the default; `--executor` overrides it. Docker failure never triggers local fallback. Results record `execution_boundary`, including whether this runner enforces permissions. Choose and record the executor before a scored run; results from different boundaries support different claims.
+`CROSS_EXAMINE_EXECUTOR=local|docker` sets the default; `--executor` overrides it. Docker failure never triggers local fallback. Results record `execution_boundary`, including whether this runner enforces permissions. Choose and record the executor before a scored run; results from different boundaries support different claims.
 
 Docker grading and transfer automatically preflight a fresh scratch workspace before executing submitted programs. The probe checks a host/container file round trip, SQLite seed and reseed reads, the trusted fixture reset, and independent host reads. Run it separately when configuring an environment:
 
@@ -35,11 +37,11 @@ Docker grading and transfer automatically preflight a fresh scratch workspace be
 python3 run.py preflight --executor docker
 ```
 
-Scratch defaults to `.scratch/` beside the runner. Set `WARGAMES_SCRATCH_ROOT` to a writable directory shared with the active Docker context when necessary. Each grading run and probe still gets a separate temporary directory there; submitted programs are staged under that same shared root. Local execution skips the Docker preflight.
+Scratch defaults to `.scratch/` beside the runner. Set `CROSS_EXAMINE_SCRATCH_ROOT` to a writable directory shared with the active Docker context when necessary. Each grading run and probe still gets a separate temporary directory there; submitted programs are staged under that same shared root. Local execution skips the Docker preflight.
 
 Every Docker replay records cleanup evidence for its exact container name. After requesting removal, the runner queries that name alone and distinguishes confirmed absence from a remaining container or an inspection error. A timeout is not treated as proof that the container stopped. Preflight failure, a Docker launch failure, or unverified cleanup produces an unscored `infrastructure-error` with exit 2 and diagnostic evidence. Check the named container and restore the daemon/context before retrying. A successful startup probe does not guarantee that infrastructure remains healthy throughout a run.
 
-The skill's ledger, lessons, and ordinary task artifacts remain local Markdown/JSON/text files. These existing examples retain SQLite because SQL updates and database reset behavior are part of their task contract; a general wargames audit does not require it. SQLite is bundled with Python, not a separate database server. No Docker daemon is contacted by the local executor.
+The skill's ledger, lessons, and ordinary task artifacts remain local Markdown/JSON/text files. These existing examples retain SQLite because SQL updates and database reset behavior are part of their task contract; a general cross-examine audit does not require it. SQLite is bundled with Python, not a separate database server. No Docker daemon is contacted by the local executor.
 
 ## Run an audit evaluation
 
@@ -51,9 +53,9 @@ python3 run.py prepare /absolute/path/to/prepared-cases
 
 Preparation produces neutral directories `case-a` through `case-e`, each with a workspace, request, evaluator-owned oracle data, and submission directory. Keep `operator-manifest.json` with the operator. The case IDs below reveal the intended distinction and must not appear in the candidate's prompt or filesystem paths.
 
-Declare the executor and its actual permissions to the audit agent before a run. Give the audit agent only the selected case's `workspace/` and `REQUEST.md`, its separate writable submission directory, and the `$wargames` skill. Hide this README, `fixtures.py`, `run.py`, calibration artifacts, other cases, and `evidence/`. Do not give the candidate full host filesystem access or the Docker socket. For a sandboxed audit, its execution tool should be operator-controlled and execute only approved scripts in the selected disposable container, with the documented mounts and limits. Local calibration does not provide that audit boundary. The agent may inspect fixture evaluator code as an auditor and propose replacements in its submission; that does not grant an evaluated-agent exploit permission to modify evaluator-owned files.
+Declare the executor and its actual permissions to the audit agent before a run. Give the audit agent only the selected case's `workspace/` and `REQUEST.md`, its separate writable submission directory, and the `$cross-examine` skill. Hide this README, `fixtures.py`, `run.py`, calibration artifacts, other cases, and `evidence/`. Do not give the candidate full host filesystem access or the Docker socket. For a sandboxed audit, its execution tool should be operator-controlled and execute only approved scripts in the selected disposable container, with the documented mounts and limits. Local calibration does not provide that audit boundary. The agent may inspect fixture evaluator code as an auditor and propose replacements in its submission; that does not grant an evaluated-agent exploit permission to modify evaluator-owned files.
 
-For container runs, the operator keeps `/oracle` read-only and supplies it only through the controlled execution environment. The portable fixture reads its oracle directory from `WARGAMES_ORACLE`; the Docker runner fixes that value to `/oracle`, while local mode supplies an ordinary host path without access protection. Retain the audit transcript and tool records so a reviewer can verify actual swarm use, permissions, attempts, and budget. Follow `REQUEST.md` for the submission format.
+For container runs, the operator keeps `/oracle` read-only and supplies it only through the controlled execution environment. The portable fixture reads its oracle directory from `CROSS_EXAMINE_ORACLE`; the Docker runner fixes that value to `/oracle`, while local mode supplies an ordinary host path without access protection. Retain the audit transcript and tool records so a reviewer can verify actual swarm use, permissions, attempts, and budget. Follow `REQUEST.md` for the submission format.
 
 Grade a completed submission using the original operator case ID:
 
@@ -95,7 +97,7 @@ This stage checks near transfer: both tasks update two-row SQLite state. It does
 
 ## Keep the ledger
 
-[LEDGER.md](LEDGER.md) records confirmed mechanisms, bounded prevention evidence, and unresolved intent gaps. Update it after each review and replay; retain old results when a grader change invalidates an earlier interpretation. The skill's [ledger instructions](../../skills/wargames/references/ledger.md) define the evidence needed. See [INTENT_REVIEW.md](INTENT_REVIEW.md) for the review of what this suite actually measures.
+[LEDGER.md](LEDGER.md) records confirmed mechanisms, bounded prevention evidence, and unresolved intent gaps. Update it after each review and replay; retain old results when a grader change invalidates an earlier interpretation. The skill's [ledger instructions](../../skills/cross-examine/references/ledger.md) define the evidence needed. See [INTENT_REVIEW.md](INTENT_REVIEW.md) for the review of what this suite actually measures.
 
 ## Complete the review
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare fixtures and replay wargames submissions locally or under container isolation."""
+"""Prepare fixtures and replay cross-examine submissions locally or under container isolation."""
 import argparse
 import json
 import os
@@ -14,10 +14,10 @@ from pathlib import Path
 from fixtures import CASES, FIXTURE_VERSION, materialize
 
 HERE = Path(__file__).resolve().parent
-IMAGE = "wargames-evals:local"
+IMAGE = "cross-examine-evals:local"
 LIMIT = 20
-GRADER_VERSION = 5
-EXECUTOR = os.environ.get("WARGAMES_EXECUTOR", "local")
+GRADER_VERSION = 6
+EXECUTOR = os.environ.get("CROSS_EXAMINE_EXECUTOR", "local")
 
 
 class InfrastructureError(RuntimeError):
@@ -34,12 +34,12 @@ def infrastructure_result(exc, **context):
 
 
 def scratch_root():
-    root = Path(os.environ.get("WARGAMES_SCRATCH_ROOT", HERE / ".scratch")).expanduser().resolve()
+    root = Path(os.environ.get("CROSS_EXAMINE_SCRATCH_ROOT", HERE / ".scratch")).expanduser().resolve()
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise InfrastructureError(
-            "Cannot create replay scratch directory. Set WARGAMES_SCRATCH_ROOT to a writable "
+            "Cannot create replay scratch directory. Set CROSS_EXAMINE_SCRATCH_ROOT to a writable "
             "directory shared with Docker when using that executor.", {"scratch": str(root), "detail": str(exc)}) from exc
     return root
 
@@ -75,7 +75,7 @@ def execution_boundary():
 def run_local(work, entry, oracle):
     """Trusted artifacts only: a cwd and timeout do not sandbox Python."""
     env = os.environ.copy()
-    env["WARGAMES_ORACLE"] = str(oracle.resolve())
+    env["CROSS_EXAMINE_ORACLE"] = str(oracle.resolve())
     process = subprocess.Popen(
         [sys.executable, "-I", "-B", str(entry.resolve())], cwd=work,
         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -136,8 +136,8 @@ def run_docker(work, script, oracle, *, external=None):
         entry = f"/workspace/{script}"
     # Target this exact container for cleanup even when the client times out.
     import uuid
-    name = "wargames-" + uuid.uuid4().hex
-    args += ["--env", "WARGAMES_ORACLE=/oracle", "--name", name, IMAGE, "python", "-I", "-B", entry]
+    name = "cross-examine-" + uuid.uuid4().hex
+    args += ["--env", "CROSS_EXAMINE_ORACLE=/oracle", "--name", name, IMAGE, "python", "-I", "-B", entry]
     launch_error = None
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=LIMIT)
@@ -265,7 +265,7 @@ def preflight(scratch):
     except (InfrastructureError, OSError, ValueError, sqlite3.Error) as exc:
         raise InfrastructureError(
             f"Replay preflight failed at {phase}. Check the Docker image/context and use "
-            "WARGAMES_SCRATCH_ROOT for a writable directory shared with Docker. No candidate was scored.",
+            "CROSS_EXAMINE_SCRATCH_ROOT for a writable directory shared with Docker. No candidate was scored.",
             {"phase": phase, "detail": str(exc), "probes": evidence,
              "cause": exc.evidence if isinstance(exc, InfrastructureError) else {}}) from exc
     return {"status": "passed", "probes": evidence}

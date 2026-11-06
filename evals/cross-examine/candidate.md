@@ -1,6 +1,6 @@
 # Audit the supplied evaluation
 
-Use `$wargames` to audit this evaluation. You may repair the eval and update the included generator skill. The evaluated agent's permissions are documented in `TASK.md`; your audit role may inspect all supplied files, but exploits must work under those evaluated-agent permissions.
+Use `$cross-examine` to audit this evaluation. You may repair the eval and update the included generator skill. The evaluated agent's permissions are documented in `TASK.md`; your audit role may inspect all supplied files, but exploits must work under those evaluated-agent permissions.
 
 Keep the original fixture intact. Write your deliverables in the separate submission directory:
 

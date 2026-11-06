@@ -1,15 +1,15 @@
 ---
-name: wargames
+name: cross-examine
 description: Proactively red-team generated agent evaluations with a small adversarial swarm. Use when creating or hardening eval tasks, environments, or verifiers to expose ways to pass without fulfilling the intended task and teach eval generators from confirmed flaws.
 ---
 
-# Wargames
+# Cross-Examine
 
 Attack an evaluation before trusting its scores. Seek a concrete counterexample: an agent receives credit without achieving the intended outcome, or the environment prevents or mismeasures a legitimate solution. Feed confirmed design flaws back into the instructions that generate future evaluations.
 
 Before generating or reviewing an eval, read [confirmed design lessons](references/lessons.md) and apply those whose conditions match the task.
 
-Maintain an evidence ledger using [the ledger instructions](references/ledger.md). Reuse the eval project's existing ledger; otherwise create `WARGAMES_LEDGER.md` beside the eval. The ledger records what was prevented, what remains unverified, and whether the evaluation still measures its intended capability.
+Maintain an evidence ledger using [the ledger instructions](references/ledger.md). Reuse the eval project's existing ledger; otherwise create `CROSS_EXAMINE_LEDGER.md` beside the eval. The ledger records what was prevented, what remains unverified, and whether the evaluation still measures its intended capability.
 
 ## Use the smallest sufficient setup
 
