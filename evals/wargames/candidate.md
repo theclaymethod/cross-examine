@@ -13,6 +13,6 @@ Keep the original fixture intact. Write your deliverables in the separate submis
 
 Use a small adversarial swarm and the skill's bounded default attack budget. Reproduce findings, verify repairs, and preserve a valid baseline. Include your run evidence in `finding.json` or a linked report. Do not change the grader or evaluator-owned assets.
 
-The evaluator executes Python artifacts in a container with no network, a read-only root filesystem, and read-only mounts for fixture scripts and evaluator-owned data. `state.sqlite`, `result.json`, and `audit.json` are writable. Extra scratch files do not become trusted evaluator inputs. Standard library only.
+Use Python's standard library only. The operator must state the execution boundary before the audit. Local replay runs with host-user permissions and does not enforce the task's access restrictions; use it only for trusted or reviewed artifacts and leave permission-dependent claims unverified. The optional Docker executor enforces no network, a read-only root filesystem, and read-only mounts for fixture scripts and evaluator-owned data. Under that boundary, `state.sqlite`, `result.json`, and `audit.json` are writable. Extra scratch files do not become trusted evaluator inputs.
 
 The evaluator independently inspects state and probes repairs with valid and invalid outcomes. Report text and lessons also receive human review; executable checks do not establish their quality by themselves.

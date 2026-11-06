@@ -71,7 +71,9 @@ raise SystemExit(0 if passed else 1)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destination", type=Path)
+    parser.add_argument("--executor", choices=("local", "docker"), default=run.EXECUTOR)
     args = parser.parse_args()
+    run.EXECUTOR = args.executor
     destination = args.destination.resolve()
     destination.mkdir(parents=True, exist_ok=False)
     results = []

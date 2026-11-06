@@ -22,6 +22,8 @@ no command-line arguments. The evaluated agent may write `state.sqlite`,
 `result.json`, and `audit.json`; evaluator code is read-only. The supplied
 generator skill is guidance, not an artifact to rewrite during this stage.
 
-An operator will replay the generated evaluation in isolated containers and
-independently inspect the database. The operator also reviews task wording,
+An operator will replay the generated evaluation with the declared local or
+sandboxed executor and independently inspect the database. Local replay does
+not enforce the task's read-only evaluator boundary; permission-dependent
+claims require a sandbox that enforces it. The operator also reviews task wording,
 the use of the learned guidance, and fresh-agent provenance.

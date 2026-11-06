@@ -10,14 +10,22 @@ Copy `skills/wargames` into your agent's skills directory. For Codex, the defaul
 
 ## Run the evals
 
-Requires Python 3.11 or newer with SQLite serialization support, and a running Docker daemon.
+The skill uses local files by default and requires no database or container runtime. The bundled examples specifically exercise database behavior, so their runner requires Python 3.11 or newer with standard-library SQLite serialization support. No third-party Python packages are required.
 
 ```bash
 cd evals/wargames
-docker build -t wargames-evals:local .
 python3 calibration.py ./calibration-output
 python3 run.py prepare ./prepared-cases
 ```
+
+Local execution is the default and is intended for trusted calibration or reviewed scripts. It has no sandbox: programs retain your host permissions. For untrusted submissions or enforced permission checks, use an adequate sandbox; the bundled Docker option is:
+
+```bash
+docker build -t wargames-evals:local .
+python3 calibration.py ./container-calibration --executor docker
+```
+
+Choose the executor explicitly for scored runs and preserve the result's `execution_boundary`. The runner never falls back from Docker to local execution.
 
 Calibration checks reference submissions and deliberately incorrect submissions. Prepared cases use neutral names; give an audit agent only one case's request and workspace, plus a separate submission directory. Keep the operator manifest and grading code outside candidate context.
 

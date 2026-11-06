@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import run
 from run import HERE, run_script, state, write_state
 
 
@@ -35,7 +36,7 @@ def prepare(source_submission, output):
 
 
 def verdict(result, expected):
-    """A crash or Docker error is not evidence of a correct rejection."""
+    """An execution error is not evidence of a correct rejection."""
     try:
         value = json.loads(result["stdout"])
     except (ValueError, TypeError):
@@ -154,6 +155,7 @@ def grade(output):
 
     return {
         "stage": "fresh-agent-transfer",
+        "execution_boundary": run.execution_boundary(),
         "checks": checks,
         "executable_checks_passed": all(checks.values()),
         "skill_evaluation_complete": False,
@@ -175,16 +177,21 @@ def main():
     p.add_argument("output", type=Path)
     g = commands.add_parser("grade")
     g.add_argument("output", type=Path)
+    g.add_argument("--executor", choices=("local", "docker"), default=run.EXECUTOR)
     args = parser.parse_args()
+    if args.command == "grade":
+        run.EXECUTOR = args.executor
     try:
         if args.command == "prepare":
             result = prepare(args.source_submission.resolve(), args.output.resolve())
         else:
             result = grade(args.output.resolve())
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        result = {"stage": "fresh-agent-transfer", "executable_checks_passed": False,
-                  "error": str(exc)}
+        result = {"stage": "fresh-agent-transfer", "execution_boundary": run.execution_boundary(),
+                  "assessment": "execution-error", "executable_checks_passed": None, "error": str(exc)}
     print(json.dumps(result, indent=2))
+    if result.get("assessment") == "execution-error":
+        raise SystemExit(2)
     raise SystemExit(0 if result.get("executable_checks_passed", "prepared" in result) else 1)
 
 

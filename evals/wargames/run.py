@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Prepare fixtures and replay wargames submissions under container isolation."""
+"""Prepare fixtures and replay wargames submissions locally or under container isolation."""
 import argparse
 import json
+import os
+import signal
+import sys
 import shutil
 import sqlite3
 import subprocess
@@ -13,11 +16,55 @@ from fixtures import CASES, FIXTURE_VERSION, materialize
 HERE = Path(__file__).resolve().parent
 IMAGE = "wargames-evals:local"
 LIMIT = 20
-GRADER_VERSION = 3
+GRADER_VERSION = 4
+EXECUTOR = os.environ.get("WARGAMES_EXECUTOR", "local")
+
+
+def execution_boundary():
+    return {"executor": EXECUTOR,
+            "isolation": "container" if EXECUTOR == "docker" else "none",
+            "permissions_enforced": EXECUTOR == "docker"}
+
+
+def run_local(work, entry, oracle):
+    """Trusted artifacts only: a cwd and timeout do not sandbox Python."""
+    env = os.environ.copy()
+    env["WARGAMES_ORACLE"] = str(oracle.resolve())
+    process = subprocess.Popen(
+        [sys.executable, "-I", "-B", str(entry.resolve())], cwd=work,
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, start_new_session=(os.name == "posix"))
+    try:
+        stdout, stderr = process.communicate(timeout=LIMIT)
+        return {"code": process.returncode, "stdout": stdout[-8000:],
+                "stderr": stderr[-4000:]}
+    except subprocess.TimeoutExpired:
+        # Kill the ordinary child process group, including reset/solution calls.
+        # A program can escape it; this is timeout hygiene, not containment.
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            process.kill()
+        try:
+            process.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.stdout.close()
+            process.stderr.close()
+        return {"code": 124, "stdout": "", "stderr": "Execution timed out"}
+
 
 
 def run_script(work, script, oracle, *, external=None):
-    """Every execution gets a new container; trusted scripts are immutable."""
+    """Use the selected executor; never silently downgrade container isolation."""
+    if EXECUTOR not in ("local", "docker"):
+        raise ValueError(f"Unknown executor: {EXECUTOR}")
+    if external is not None and (external.is_symlink() or not external.is_file()):
+        raise ValueError(f"Expected a regular submission artifact: {external}")
+    if EXECUTOR == "local":
+        return run_local(work, external if external is not None else work / script, oracle)
     args = ["docker", "run", "--rm", "--network=none", "--read-only",
             "--cap-drop=ALL", "--security-opt=no-new-privileges",
             "--pids-limit=64", "--memory=128m", "--cpus=1",
@@ -28,16 +75,14 @@ def run_script(work, script, oracle, *, external=None):
         if (work / name).exists():
             args += ["--mount", f"type=bind,src={work / name},dst=/workspace/{name},readonly"]
     if external is not None:
-        if external.is_symlink() or not external.is_file():
-            raise ValueError(f"Expected a regular submission artifact: {external}")
         args += ["--mount", f"type=bind,src={external},dst=/candidate.py,readonly"]
         entry = "/candidate.py"
     else:
         entry = f"/workspace/{script}"
-    # Container name permits guaranteed cleanup even when the client times out.
+    # Target this exact container for cleanup even when the client times out.
     import uuid
     name = "wargames-" + uuid.uuid4().hex
-    args += ["--name", name, IMAGE, "python", "-I", "-B", entry]
+    args += ["--env", "WARGAMES_ORACLE=/oracle", "--name", name, IMAGE, "python", "-I", "-B", entry]
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=LIMIT)
         return {"code": result.returncode, "stdout": result.stdout[-8000:],
@@ -145,6 +190,7 @@ def grade(case, submission):
     if (kind in ("clean", "access") and checks["report_present"]
             and finding.get("classification") == "confirmed"):
         return {"case": case, "fixture_version": FIXTURE_VERSION, "grader_version": GRADER_VERSION,
+                "execution_boundary": execution_boundary(),
                 "assessment": "requires-independent-adjudication", "checks": {"report_present": True},
                 "executable_checks_passed": None, "skill_evaluation_complete": False,
                 "human_review_required": ["Independently reproduce the unexpected finding before deciding whether the seeded control or submission is wrong."],
@@ -231,6 +277,7 @@ def grade(case, submission):
             materialize(case, Path(tmp))
             checks["no_unconfirmed_lesson"] = lesson.read_text() == (Path(tmp) / "generator/SKILL.md").read_text()
     return {"case": case, "fixture_version": FIXTURE_VERSION, "grader_version": GRADER_VERSION,
+            "execution_boundary": execution_boundary(),
             "checks": checks, "executable_checks_passed": all(checks.values()), "skill_evaluation_complete": False,
             "human_review_required": ["Evidence supports classification and actual swarm use",
                                       "Root cause and lesson quality, scope, and provenance",
@@ -301,6 +348,7 @@ def prepare(destination):
 
 
 def main():
+    global EXECUTOR
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     p = commands.add_parser("prepare")
@@ -308,16 +356,19 @@ def main():
     g = commands.add_parser("grade")
     g.add_argument("case", choices=CASES)
     g.add_argument("submission", type=Path)
+    g.add_argument("--executor", choices=("local", "docker"), default=EXECUTOR)
     args = parser.parse_args()
     if args.command == "prepare":
         prepare(args.destination.resolve())
         return
+    EXECUTOR = args.executor
     try:
         result = grade(args.case, args.submission.resolve())
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        result = {"case": args.case, "executable_checks_passed": False, "error": str(exc)}
+        result = {"case": args.case, "execution_boundary": execution_boundary(),
+                  "assessment": "execution-error", "executable_checks_passed": None, "error": str(exc)}
     print(json.dumps(result, indent=2))
-    if result.get("assessment") == "requires-independent-adjudication":
+    if result.get("assessment") in ("requires-independent-adjudication", "execution-error"):
         raise SystemExit(2)
     raise SystemExit(0 if result["executable_checks_passed"] else 1)
 

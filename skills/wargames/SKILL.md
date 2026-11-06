@@ -11,6 +11,12 @@ Before generating or reviewing an eval, read [confirmed design lessons](referenc
 
 Maintain an evidence ledger using [the ledger instructions](references/ledger.md). Reuse the eval project's existing ledger; otherwise create `WARGAMES_LEDGER.md` beside the eval. The ledger records what was prevented, what remains unverified, and whether the evaluation still measures its intended capability.
 
+## Use the smallest sufficient setup
+
+Default to ordinary local files: Markdown for the ledger and lessons, JSON or text for task state, and separate scratch directories for attacks and replays. Use the project's existing runtime and checks. Add SQLite when the task requires SQL, transactions, relational constraints, or database lifecycle behavior. Use Docker or another isolation boundary when executing untrusted programs or testing permissions that local processes cannot enforce; reuse an adequate existing sandbox when available. Record why each added dependency is needed.
+
+A disposable directory and subprocess timeout provide repeatability, not containment. Local replay is suitable for trusted calibration or reviewed artifacts, but shares the host user's file, network, and process access. Record that limitation in the ledger and verdict. Test permission-dependent claims in an environment that enforces the claimed boundary; otherwise leave those claims unverified. Keep evidence and grader receipts outside candidate access using the available access controls.
+
 ## Establish the game
 
 Read the task, environment setup and reset path, verifier, scoring rules, and any eval-generator instructions. State the intended capability and observable success independently of the verifier's implementation. If the intended outcome is ambiguous, resolve that ambiguity before declaring a shortcut illegitimate.

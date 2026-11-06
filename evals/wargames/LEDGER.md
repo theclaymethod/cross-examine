@@ -34,3 +34,14 @@ The two model pilots remain development results, not held-out scores. The grader
 For future scored runs, freeze grader/request/guidance hashes before candidates run, retain receipts outside candidate access, enforce the discovery boundary, use fresh held-out variants, and review actual discovery, swarm behavior, and lessons. Published cases and their solutions are development materials. Until those conditions are met, no complete skill-success or broad-generalization claim is supported.
 
 Append later observations and replays here; preserve this account if a prevention regresses or a new defect invalidates a control.
+
+
+## 2026-11-06: minimal-tooling execution
+
+The skill now defaults to ordinary local files for task state, lessons, and the ledger. SQLite is conditional on database semantics; the existing database examples retain it because SQL updates and reset behavior are their explicit contract. Docker is optional and reserved for isolation that the host runner cannot enforce. No database service or third-party Python package is required.
+
+Grader version 4 adds local execution as the default, explicit `--executor local|docker` selection, and an `execution_boundary` in results. Fixture version 3 makes the access-trap oracle path portable. The local oracle path is ordinary host storage, not protected evaluator state. Local mode can establish artifact behavior for trusted/reviewed programs but cannot substantiate permission-dependent prevention claims. In particular, the earlier read-only mount evidence applies to Docker, not local execution. No automatic Docker-to-local fallback exists.
+
+Both the [local calibration](evidence/minimal-tooling-2026-11-06/local-summary.json) and [Docker calibration](evidence/minimal-tooling-2026-11-06/docker-summary.json) passed all 11 checks. Local calibration ran with `PATH=/nonexistent`, so Docker was unavailable on its command path. The existing timeout probe [returned code 124](evidence/minimal-tooling-2026-11-06/local-timeout.json) and left no live processes in its ordinary POSIX process group. This is timeout hygiene, not containment of programs that deliberately escape a process group. The [receipt](evidence/minimal-tooling-2026-11-06/receipt.json) records versions and retrospective source hashes.
+
+Intent verdict: these development calibrations preserve the narrower artifact checks and negative controls. They do not establish discovery, swarm behavior, useful teaching, held-out reliability, or local isolation. The runner continues to mark the full skill evaluation incomplete. Scored audits must declare their executor and enforce any permissions on which their conclusions depend.
