@@ -144,4 +144,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except run.InfrastructureError as exc:
+        print(json.dumps(run.infrastructure_result(exc, stage="calibration"), indent=2))
+        raise SystemExit(2)

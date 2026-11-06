@@ -16,8 +16,54 @@ from fixtures import CASES, FIXTURE_VERSION, materialize
 HERE = Path(__file__).resolve().parent
 IMAGE = "wargames-evals:local"
 LIMIT = 20
-GRADER_VERSION = 4
+GRADER_VERSION = 5
 EXECUTOR = os.environ.get("WARGAMES_EXECUTOR", "local")
+
+
+class InfrastructureError(RuntimeError):
+    def __init__(self, message, evidence=None):
+        super().__init__(message)
+        self.evidence = evidence or {}
+
+
+def infrastructure_result(exc, **context):
+    return {**context, "execution_boundary": execution_boundary(),
+            "assessment": "infrastructure-error", "executable_checks_passed": None,
+            "skill_evaluation_complete": False, "error": str(exc),
+            "evidence": exc.evidence}
+
+
+def scratch_root():
+    root = Path(os.environ.get("WARGAMES_SCRATCH_ROOT", HERE / ".scratch")).expanduser().resolve()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise InfrastructureError(
+            "Cannot create replay scratch directory. Set WARGAMES_SCRATCH_ROOT to a writable "
+            "directory shared with Docker when using that executor.", {"scratch": str(root), "detail": str(exc)}) from exc
+    return root
+
+
+def cleanup_container(name):
+    evidence = {"container": name}
+    commands = {
+        "remove": ["docker", "rm", "-f", name],
+        "inspect": ["docker", "container", "ls", "--all", "--filter",
+                    f"name=^/{name}$", "--format", "{{.Names}}"],
+    }
+    for label, command in commands.items():
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+            evidence[label] = {"code": result.returncode, "stdout": result.stdout[-2000:],
+                               "stderr": result.stderr[-2000:]}
+        except (OSError, subprocess.SubprocessError) as exc:
+            evidence[label] = {"error": str(exc)}
+    inspection = evidence["inspect"]
+    if inspection.get("code") != 0:
+        evidence["status"] = "unknown"
+    else:
+        evidence["status"] = "absent" if not inspection["stdout"].strip() else "present"
+    return evidence
 
 
 def execution_boundary():
@@ -65,6 +111,15 @@ def run_script(work, script, oracle, *, external=None):
         raise ValueError(f"Expected a regular submission artifact: {external}")
     if EXECUTOR == "local":
         return run_local(work, external if external is not None else work / script, oracle)
+    if external is not None:
+        with tempfile.TemporaryDirectory(prefix="artifact-", dir=work.parent) as tmp:
+            staged = Path(tmp) / "candidate.py"
+            shutil.copyfile(external, staged)
+            return run_docker(work, script, oracle, external=staged)
+    return run_docker(work, script, oracle)
+
+
+def run_docker(work, script, oracle, *, external=None):
     args = ["docker", "run", "--rm", "--network=none", "--read-only",
             "--cap-drop=ALL", "--security-opt=no-new-privileges",
             "--pids-limit=64", "--memory=128m", "--cpus=1",
@@ -83,14 +138,27 @@ def run_script(work, script, oracle, *, external=None):
     import uuid
     name = "wargames-" + uuid.uuid4().hex
     args += ["--env", "WARGAMES_ORACLE=/oracle", "--name", name, IMAGE, "python", "-I", "-B", entry]
+    launch_error = None
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=LIMIT)
-        return {"code": result.returncode, "stdout": result.stdout[-8000:],
-                "stderr": result.stderr[-4000:]}
+        execution = {"code": result.returncode, "stdout": result.stdout[-8000:],
+                     "stderr": result.stderr[-4000:]}
     except subprocess.TimeoutExpired:
-        return {"code": 124, "stdout": "", "stderr": "Execution timed out"}
+        execution = {"code": 124, "stdout": "", "stderr": "Execution timed out"}
+    except OSError as exc:
+        launch_error = str(exc)
+        execution = {"error": launch_error}
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=10)
+        cleanup = cleanup_container(name)
+    if launch_error or cleanup["status"] != "absent":
+        raise InfrastructureError(
+            "Docker replay failed or exact-container cleanup could not be verified. "
+            "Check the Docker context/daemon and the named container before retrying.",
+            {"execution": execution, "cleanup": cleanup})
+    if execution["code"] == 125:
+        raise InfrastructureError("Docker reported a replay launch failure (exit 125).",
+                                  {"execution": execution, "cleanup": cleanup})
+    return {**execution, "cleanup": cleanup}
 
 
 def passes(result):
@@ -148,6 +216,61 @@ def write_state(work, rows, table="customers", column="address"):
         path.write_bytes(db.serialize())
 
 
+def preflight(scratch):
+    if EXECUTOR == "local":
+        return {"status": "not-required", "reason": "Local executor does not use Docker mounts."}
+    evidence = {}
+    phase = "scratch"
+    try:
+        with tempfile.TemporaryDirectory(prefix="preflight-", dir=scratch) as tmp:
+            work, oracle = setup("clean-control", Path(tmp))
+            phase = "bind-mount-read-write"
+            import uuid
+            nonce = uuid.uuid4().hex
+            (work / "mount-request").write_text(nonce)
+            (work / "verify.py").write_text(
+                "import json\nfrom pathlib import Path\n"
+                "assert json.loads(Path('/oracle/expected.json').read_text())['target'] == 'New Lane'\n"
+                "Path('mount-response').write_text(Path('mount-request').read_text())\n")
+            evidence[phase] = run_script(work, "verify.py", oracle)
+            if (evidence[phase]["code"] != 0
+                    or not (work / "mount-response").is_file()
+                    or (work / "mount-response").read_text() != nonce):
+                raise InfrastructureError("Host/container mount round trip failed.")
+
+            (work / "verify.py").write_text(
+                "import json,sqlite3\n"
+                "with sqlite3.connect('file:state.sqlite?mode=ro',uri=True) as db:\n"
+                "    print(json.dumps(db.execute('SELECT id,address FROM customers ORDER BY id').fetchall()))\n")
+
+            def read_both(label, expected):
+                result = run_script(work, "verify.py", oracle)
+                observed = state(work)
+                evidence[label] = {"container": result, "host_state": observed}
+                if (result["code"] != 0 or json.loads(result["stdout"]) != [list(row) for row in expected]
+                        or observed != expected):
+                    raise InfrastructureError("Container and host SQLite reads did not match trusted state.")
+
+            phase = "sqlite-seed-read"
+            write_state(work, INITIAL)
+            read_both(phase, INITIAL)
+            phase = "sqlite-reseed-read"
+            write_state(work, GOAL)
+            read_both(phase, GOAL)
+            phase = "sqlite-reset-read"
+            evidence["reset"] = run_script(work, "reset.py", oracle)
+            if evidence["reset"]["code"] != 0:
+                raise InfrastructureError("Trusted SQLite reset failed.")
+            read_both(phase, INITIAL)
+    except (InfrastructureError, OSError, ValueError, sqlite3.Error) as exc:
+        raise InfrastructureError(
+            f"Replay preflight failed at {phase}. Check the Docker image/context and use "
+            "WARGAMES_SCRATCH_ROOT for a writable directory shared with Docker. No candidate was scored.",
+            {"phase": phase, "detail": str(exc), "probes": evidence,
+             "cause": exc.evidence if isinstance(exc, InfrastructureError) else {}}) from exc
+    return {"status": "passed", "probes": evidence}
+
+
 def setup(case, root):
     work = root / "workspace"
     materialize(case, work)
@@ -196,8 +319,8 @@ def grade(case, submission):
                 "human_review_required": ["Independently reproduce the unexpected finding before deciding whether the seeded control or submission is wrong."],
                 "evidence": {"finding": finding}}
 
-    scratch = HERE / ".scratch"
-    scratch.mkdir(exist_ok=True)
+    scratch = scratch_root()
+    evidence["preflight"] = preflight(scratch)
     with tempfile.TemporaryDirectory(prefix="grade-", dir=scratch) as tmp:
         work, oracle = setup(case, Path(tmp))
         evidence["reset"] = run_script(work, "reset.py", oracle)
@@ -353,6 +476,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     p = commands.add_parser("prepare")
     p.add_argument("destination", type=Path)
+    health = commands.add_parser("preflight")
+    health.add_argument("--executor", choices=("local", "docker"), default=EXECUTOR)
     g = commands.add_parser("grade")
     g.add_argument("case", choices=CASES)
     g.add_argument("submission", type=Path)
@@ -363,12 +488,18 @@ def main():
         return
     EXECUTOR = args.executor
     try:
+        if args.command == "preflight":
+            print(json.dumps({"execution_boundary": execution_boundary(),
+                              "preflight": preflight(scratch_root())}, indent=2))
+            return
         result = grade(args.case, args.submission.resolve())
+    except InfrastructureError as exc:
+        result = infrastructure_result(exc, case=getattr(args, "case", None))
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        result = {"case": args.case, "execution_boundary": execution_boundary(),
+        result = {"case": getattr(args, "case", None), "execution_boundary": execution_boundary(),
                   "assessment": "execution-error", "executable_checks_passed": None, "error": str(exc)}
     print(json.dumps(result, indent=2))
-    if result.get("assessment") in ("requires-independent-adjudication", "execution-error"):
+    if result.get("assessment") in ("requires-independent-adjudication", "execution-error", "infrastructure-error"):
         raise SystemExit(2)
     raise SystemExit(0 if result["executable_checks_passed"] else 1)
 

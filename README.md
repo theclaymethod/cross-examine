@@ -25,7 +25,7 @@ docker build -t wargames-evals:local .
 python3 calibration.py ./container-calibration --executor docker
 ```
 
-Choose the executor explicitly for scored runs and preserve the result's `execution_boundary`. The runner never falls back from Docker to local execution.
+Choose the executor explicitly for scored runs and preserve the result's `execution_boundary`. The runner never falls back from Docker to local execution. Docker runs preflight the configured shared scratch storage and SQLite lifecycle, then verify exact-container cleanup after each replay. Infrastructure failures remain unscored.
 
 Calibration checks reference submissions and deliberately incorrect submissions. Prepared cases use neutral names; give an audit agent only one case's request and workspace, plus a separate submission directory. Keep the operator manifest and grading code outside candidate context.
 

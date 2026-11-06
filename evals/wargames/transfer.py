@@ -60,8 +60,8 @@ def grade(output):
     for name in ("reset.py", "verify.py", "solution.py"):
         regular(output / name)
 
-    scratch = HERE / ".scratch"
-    scratch.mkdir(exist_ok=True)
+    scratch = run.scratch_root()
+    evidence["preflight"] = run.preflight(scratch)
     with tempfile.TemporaryDirectory(prefix="transfer-", dir=scratch) as tmp:
         root = Path(tmp)
         oracle = root / "oracle"
@@ -186,11 +186,13 @@ def main():
             result = prepare(args.source_submission.resolve(), args.output.resolve())
         else:
             result = grade(args.output.resolve())
+    except run.InfrastructureError as exc:
+        result = run.infrastructure_result(exc, stage="fresh-agent-transfer")
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         result = {"stage": "fresh-agent-transfer", "execution_boundary": run.execution_boundary(),
                   "assessment": "execution-error", "executable_checks_passed": None, "error": str(exc)}
     print(json.dumps(result, indent=2))
-    if result.get("assessment") == "execution-error":
+    if result.get("assessment") in ("execution-error", "infrastructure-error"):
         raise SystemExit(2)
     raise SystemExit(0 if result.get("executable_checks_passed", "prepared" in result) else 1)
 

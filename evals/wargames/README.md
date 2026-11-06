@@ -29,6 +29,16 @@ python3 transfer.py grade /absolute/path/to/transfer-output --executor docker
 
 `WARGAMES_EXECUTOR=local|docker` sets the default; `--executor` overrides it. Docker failure never triggers local fallback. Results record `execution_boundary`, including whether this runner enforces permissions. Choose and record the executor before a scored run; results from different boundaries support different claims.
 
+Docker grading and transfer automatically preflight a fresh scratch workspace before executing submitted programs. The probe checks a host/container file round trip, SQLite seed and reseed reads, the trusted fixture reset, and independent host reads. Run it separately when configuring an environment:
+
+```bash
+python3 run.py preflight --executor docker
+```
+
+Scratch defaults to `.scratch/` beside the runner. Set `WARGAMES_SCRATCH_ROOT` to a writable directory shared with the active Docker context when necessary. Each grading run and probe still gets a separate temporary directory there; submitted programs are staged under that same shared root. Local execution skips the Docker preflight.
+
+Every Docker replay records cleanup evidence for its exact container name. After requesting removal, the runner queries that name alone and distinguishes confirmed absence from a remaining container or an inspection error. A timeout is not treated as proof that the container stopped. Preflight failure, a Docker launch failure, or unverified cleanup produces an unscored `infrastructure-error` with exit 2 and diagnostic evidence. Check the named container and restore the daemon/context before retrying. A successful startup probe does not guarantee that infrastructure remains healthy throughout a run.
+
 The skill's ledger, lessons, and ordinary task artifacts remain local Markdown/JSON/text files. These existing examples retain SQLite because SQL updates and database reset behavior are part of their task contract; a general wargames audit does not require it. SQLite is bundled with Python, not a separate database server. No Docker daemon is contacted by the local executor.
 
 ## Run an audit evaluation
