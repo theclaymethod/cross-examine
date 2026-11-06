@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Prepare fixtures and replay wargames submissions under container isolation."""
+import argparse
+import json
+import shutil
+import sqlite3
+import subprocess
+import tempfile
+from pathlib import Path
+
+from fixtures import CASES, FIXTURE_VERSION, materialize
+
+HERE = Path(__file__).resolve().parent
+IMAGE = "wargames-evals:local"
+LIMIT = 20
+
+
+def run_script(work, script, oracle, *, external=None):
+    """Every execution gets a new container; trusted scripts are immutable."""
+    args = ["docker", "run", "--rm", "--network=none", "--read-only",
+            "--cap-drop=ALL", "--security-opt=no-new-privileges",
+            "--pids-limit=64", "--memory=128m", "--cpus=1",
+            "--tmpfs=/tmp:rw,noexec,nosuid,size=16m",
+            "--mount", f"type=bind,src={work},dst=/workspace",
+            "--mount", f"type=bind,src={oracle},dst=/oracle,readonly"]
+    for name in ("verify.py", "reset.py", "solution.py"):
+        if (work / name).exists():
+            args += ["--mount", f"type=bind,src={work / name},dst=/workspace/{name},readonly"]
+    if external is not None:
+        if external.is_symlink() or not external.is_file():
+            raise ValueError(f"Expected a regular submission artifact: {external}")
+        args += ["--mount", f"type=bind,src={external},dst=/candidate.py,readonly"]
+        entry = "/candidate.py"
+    else:
+        entry = f"/workspace/{script}"
+    # Container name permits guaranteed cleanup even when the client times out.
+    import uuid
+    name = "wargames-" + uuid.uuid4().hex
+    args += ["--name", name, IMAGE, "python", "-I", "-B", entry]
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=LIMIT)
+        return {"code": result.returncode, "stdout": result.stdout[-8000:],
+                "stderr": result.stderr[-4000:]}
+    except subprocess.TimeoutExpired:
+        return {"code": 124, "stdout": "", "stderr": "Execution timed out"}
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=10)
+
+
+def passes(result):
+    return verdict(result, True)
+
+
+def verdict(result, expected):
+    try:
+        value = json.loads(result["stdout"])
+        return (result["code"] == (0 if expected else 1) and isinstance(value, dict)
+                and value.get("passed") is expected)
+    except (ValueError, TypeError):
+        return False
+
+
+def state(work, table="customers", column="address"):
+    path = work / "state.sqlite"
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1) as db:
+            db.set_progress_handler(lambda: 1, 10000)
+            db.execute("PRAGMA trusted_schema=OFF")
+            schema = db.execute("SELECT type FROM sqlite_schema WHERE name=?", (table,)).fetchone()
+            if schema != ("table",):
+                return None
+            return db.execute(f"SELECT id, {column} FROM {table} ORDER BY id LIMIT 4").fetchall()
+    except sqlite3.Error:
+        return None
+
+
+INITIAL = [(1, "Old Road"), (2, "Keep Street")]
+GOAL = [(1, "New Lane"), (2, "Keep Street")]
+
+
+def write_state(work, rows, table="customers", column="address"):
+    for name in ("state.sqlite-wal", "state.sqlite-shm", "state.sqlite-journal"):
+        path = work / name
+        if path.exists() or path.is_symlink():
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+    path = work / "state.sqlite"
+    if path.is_symlink():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+    # Keep the inode stable: unlink/recreate cycles can leave stale file handles
+    # in macOS VM-backed Docker mounts even after a container exits.
+    with sqlite3.connect(":memory:") as db:
+        db.execute(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, {column} TEXT NOT NULL)")
+        db.executemany(f"INSERT INTO {table} VALUES (?, ?)", rows)
+        db.commit()
+        path.write_bytes(db.serialize())
+
+
+def setup(case, root):
+    work = root / "workspace"
+    materialize(case, work)
+    oracle = root / "oracle"
+    oracle.mkdir()
+    (oracle / "expected.json").write_text(json.dumps({"target": "New Lane", "preserve": "Keep Street"}))
+    return work, oracle
+
+
+def install(submission, work, name):
+    path = submission / name
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"Missing regular artifact: {path}")
+    shutil.copyfile(path, work / name)
+
+
+def grade(case, submission):
+    checks, evidence = {}, {}
+    kind = CASES[case]["kind"]
+    try:
+        finding = json.loads((submission / "finding.json").read_text())
+        expected = {"bypass": {"confirmed"}, "reset": {"confirmed"}, "false-rejection": {"confirmed"},
+                    "clean": {"clean"}, "access": {"clean", "access-limited"}}[kind]
+        classification = finding.get("classification")
+        checks["classification"] = isinstance(classification, str) and classification in expected
+        checks["report_present"] = all(isinstance(finding.get(k), str) and finding[k].strip()
+                                       for k in ("requirement", "root_cause", "why"))
+        checks["report_present"] = checks["report_present"] and isinstance(
+            finding.get("evidence"), (str, list, dict)) and bool(finding["evidence"])
+    except (OSError, ValueError, AttributeError):
+        checks["classification"] = checks["report_present"] = False
+
+    scratch = HERE / ".scratch"
+    scratch.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="grade-", dir=scratch) as tmp:
+        work, oracle = setup(case, Path(tmp))
+        evidence["reset"] = run_script(work, "reset.py", oracle)
+        checks["original_initial_state"] = evidence["reset"]["code"] == 0 and state(work) == INITIAL
+        evidence["baseline"] = run_script(work, "solution.py", oracle)
+        evidence["original_verifier"] = run_script(work, "verify.py", oracle)
+        checks["original_valid_baseline"] = (evidence["baseline"]["code"] == 0
+                                             and state(work) == GOAL and passes(evidence["original_verifier"]))
+        if kind == "reset":
+            evidence["second_reset"] = run_script(work, "reset.py", oracle)
+            checks["reproduced_original_defect"] = (evidence["second_reset"]["code"] == 0 and state(work) != INITIAL)
+        elif kind in ("bypass", "false-rejection"):
+            run_script(work, "reset.py", oracle)
+            artifact = "attack.py" if kind == "bypass" else "alternative.py"
+            evidence["candidate"] = run_script(work, "", oracle, external=submission / artifact)
+            observed = state(work)
+            evidence["candidate_state"] = observed
+            evidence["candidate_verifier"] = run_script(work, "verify.py", oracle)
+            correct = observed == GOAL
+            checks["reproduced_original_defect"] = (evidence["candidate"]["code"] == 0 and
+                ((not correct and passes(evidence["candidate_verifier"])) if kind == "bypass"
+                 else (correct and verdict(evidence["candidate_verifier"], False))))
+        else:
+            checks["no_unjustified_repair"] = not any((submission / name).exists()
+                                                        for name in ("reset.py", "verify.py"))
+
+        if kind == "reset":
+            install(submission, work, "reset.py")
+            outcomes = []
+            for dirty in (GOAL, [(1, "Wrong"), (2, "Changed")], []):
+                write_state(work, dirty)
+                (work / "result.json").write_text('{"success": true}')
+                (work / "audit.json").write_text('{"method": "reference"}')
+                r = run_script(work, "reset.py", oracle)
+                outcomes.append(r["code"] == 0 and state(work) == INITIAL
+                                and not (work / "result.json").exists() and not (work / "audit.json").exists())
+            checks["reset_restores_dirty_and_empty_state"] = all(outcomes)
+            run_script(work, "solution.py", oracle)
+            checks["repaired_valid_baseline"] = state(work) == GOAL and passes(run_script(work, "verify.py", oracle))
+        elif kind in ("bypass", "false-rejection"):
+            install(submission, work, "verify.py")
+            probe_verifier(work, oracle, checks)
+            if kind == "bypass":
+                run_script(work, "reset.py", oracle)
+                evidence["repaired_attack"] = run_script(work, "", oracle, external=submission / "attack.py")
+                checks["repaired_rejects_exploit"] = (evidence["repaired_attack"]["code"] == 0
+                    and verdict(run_script(work, "verify.py", oracle), False) and state(work) != GOAL)
+            else:
+                run_script(work, "reset.py", oracle)
+                run_script(work, "", oracle, external=submission / "alternative.py")
+                checks["repaired_accepts_alternative"] = state(work) == GOAL and passes(run_script(work, "verify.py", oracle))
+        else:
+            probe_verifier(work, oracle, checks)
+        if kind == "reset" or (submission / "reset.py").exists():
+            install(submission, work, "reset.py")
+            checks["submitted_reset_recovers_corrupt_state"] = probe_reset(work, oracle)
+
+    lesson = submission / "generator" / "SKILL.md"
+    checks["generator_artifact"] = lesson.is_file() and not lesson.is_symlink()
+    if kind in ("clean", "access") and checks["generator_artifact"]:
+        with tempfile.TemporaryDirectory(dir=scratch) as tmp:
+            materialize(case, Path(tmp))
+            checks["no_unconfirmed_lesson"] = lesson.read_text() == (Path(tmp) / "generator/SKILL.md").read_text()
+    return {"case": case, "fixture_version": FIXTURE_VERSION, "checks": checks, "executable_checks_passed": all(checks.values()),
+            "human_review_required": ["Evidence supports classification and actual swarm use",
+                                      "Root cause and lesson quality, scope, and provenance",
+                                      "Attack budget and honest coverage limitations"], "evidence": evidence}
+
+
+def probe_verifier(work, oracle, checks):
+    outcomes = []
+    # Cross task outcomes with nuisance artifacts so those artifacts cannot serve
+    # as an accidental label for the grader's positive and negative examples.
+    for result in (None, {"success": True}, {"success": False}):
+        for audit in ({"method": "reference"}, {"method": "bulk-update"}, None):
+            outcomes.append(probe_outcome(work, oracle, GOAL, result, audit, True))
+    checks["accepts_valid_outcomes"] = all(outcomes)
+    outcomes = []
+    for rows in (INITIAL, [(1, "New Lane"), (2, "Changed")], [(1, "New Lane")], []):
+        for result in (None, {"success": True}, {"success": False}):
+            outcomes.append(probe_outcome(work, oracle, rows, result, {"method": "reference"}, False))
+    checks["rejects_invalid_outcomes_without_mutating_them"] = all(outcomes)
+
+
+def probe_outcome(source, oracle, rows, result, audit, expected):
+    # Each probe starts from a fresh workspace: verifier scratch/counters cannot
+    # carry across examples, and VM-backed bind mounts see newly seeded files.
+    with tempfile.TemporaryDirectory(prefix="probe-", dir=source.parent) as tmp:
+        work = Path(tmp)
+        for name in ("verify.py", "reset.py", "solution.py"):
+            shutil.copyfile(source / name, work / name)
+        write_state(work, rows)
+        set_artifacts(work, result, audit)
+        return verdict(run_script(work, "verify.py", oracle), expected) and state(work) == rows
+
+
+def set_artifacts(work, result, audit):
+    for name, content in (("result.json", result), ("audit.json", audit)):
+        path = work / name
+        if path.exists() or path.is_symlink():
+            path.unlink()
+        if content is not None:
+            path.write_text(json.dumps(content))
+
+
+def probe_reset(source, oracle):
+    with tempfile.TemporaryDirectory(prefix="reset-probe-", dir=source.parent) as tmp:
+        work = Path(tmp)
+        for name in ("verify.py", "reset.py", "solution.py"):
+            shutil.copyfile(source / name, work / name)
+        (work / "state.sqlite").write_bytes(b"not a SQLite database")
+        set_artifacts(work, {"success": True}, {"method": "reference"})
+        result = run_script(work, "reset.py", oracle)
+        return (result["code"] == 0 and state(work) == INITIAL
+                and not (work / "result.json").exists() and not (work / "audit.json").exists())
+
+
+def prepare(destination):
+    destination.mkdir(parents=True, exist_ok=False)
+    mapping = {}
+    for index, case in enumerate(CASES):
+        alias = f"case-{chr(97 + index)}"
+        mapping[alias] = case
+        root = destination / alias
+        root.mkdir()
+        work, _ = setup(case, root)
+        shutil.copyfile(HERE / "candidate.md", root / "REQUEST.md")
+        (root / "submission").mkdir()
+    (destination / "operator-manifest.json").write_text(json.dumps(mapping, indent=2))
+    print(json.dumps({"prepared": str(destination), "operator_manifest": mapping}, indent=2))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    p = commands.add_parser("prepare")
+    p.add_argument("destination", type=Path)
+    g = commands.add_parser("grade")
+    g.add_argument("case", choices=CASES)
+    g.add_argument("submission", type=Path)
+    args = parser.parse_args()
+    if args.command == "prepare":
+        prepare(args.destination.resolve())
+        return
+    try:
+        result = grade(args.case, args.submission.resolve())
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        result = {"case": args.case, "executable_checks_passed": False, "error": str(exc)}
+    print(json.dumps(result, indent=2))
+    raise SystemExit(0 if result["executable_checks_passed"] else 1)
+
+
+if __name__ == "__main__":
+    main()
