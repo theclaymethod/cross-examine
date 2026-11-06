@@ -156,6 +156,7 @@ def grade(output):
         "stage": "fresh-agent-transfer",
         "checks": checks,
         "executable_checks_passed": all(checks.values()),
+        "skill_evaluation_complete": False,
         "human_review_required": [
             "Fresh generation agent received only the prepared directory and learned generator guidance.",
             "TASK.md matches the order-cancellation contract and evaluated-agent access.",

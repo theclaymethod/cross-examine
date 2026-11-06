@@ -2,11 +2,12 @@
 """Known-good submissions for checking the eval machinery, not model scores."""
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 import run
 import transfer
-from fixtures import CASES, materialize
+from fixtures import CASES, FIXTURE_VERSION, materialize
 
 
 LESSONS = {
@@ -36,7 +37,7 @@ def create(case, destination):
     }
     if case in LESSONS:
         failure, rule = LESSONS[case]
-        generator += f"\n## Confirmed design lesson\n\nFailure: {failure}\n\nWhy: {finding['why']}\n\nGenerate instead: {rule}\n\nEvidence: {case}, fixture version 1, sibling finding.json and replay artifacts; run the trusted grader for repair results.\n"
+        generator += f"\n## Confirmed design lesson\n\nFailure: {failure}\n\nWhy: {finding['why']}\n\nGenerate instead: {rule}\n\nEvidence: {case}, fixture version {FIXTURE_VERSION}, sibling finding.json and replay artifacts; run the trusted grader for repair results.\n"
     (submission / "generator/SKILL.md").write_text(generator)
     (submission / "finding.json").write_text(json.dumps(finding, indent=2))
     if kind == "bypass":
@@ -46,6 +47,7 @@ def create(case, destination):
     if kind in ("bypass", "false-rejection"):
         (submission / "verify.py").write_text(correct_verifier())
     if kind == "reset":
+        (submission / "attack.py").write_text("import subprocess,sys\nsubprocess.run([sys.executable,'-I','-B','solution.py'],check=True)\nsubprocess.run([sys.executable,'-I','-B','reset.py'],check=True)\n")
         # Pull the sound reset from the clean fixture, preserving the fixture's task.
         fixed = destination / "fixed"
         materialize("clean-control", fixed)
@@ -86,6 +88,29 @@ def main():
     negative = run.grade("verifier-bypass", proxy)
     (destination / "negative-proxy/result.json").write_text(json.dumps(negative, indent=2))
     results.append({"case": "negative-proxy", "passed": not negative["executable_checks_passed"]})
+    print(json.dumps(results[-1]), flush=True)
+    missing = create("stale-reset", destination / "negative-missing-reproducer")
+    (missing / "attack.py").unlink()
+    incomplete = run.grade("stale-reset", missing)
+    (missing.parent / "result.json").write_text(json.dumps(incomplete, indent=2))
+    results.append({"case": "negative-missing-reproducer", "passed": not incomplete["executable_checks_passed"]})
+    print(json.dumps(results[-1]), flush=True)
+    unchanged = create("verifier-bypass", destination / "negative-unchanged-guidance")
+    shutil.copyfile(unchanged.parent / "original/generator/SKILL.md", unchanged / "generator/SKILL.md")
+    incomplete = run.grade("verifier-bypass", unchanged)
+    (unchanged.parent / "result.json").write_text(json.dumps(incomplete, indent=2))
+    results.append({"case": "negative-unchanged-guidance", "passed": not incomplete["executable_checks_passed"]})
+    print(json.dumps(results[-1]), flush=True)
+    unexpected = create("clean-control", destination / "unexpected-control-finding")
+    finding = json.loads((unexpected / "finding.json").read_text())
+    finding["classification"] = "confirmed"
+    finding["evidence"] = "Synthetic routing check only; no unexpected defect is asserted by this calibration."
+    (unexpected / "finding.json").write_text(json.dumps(finding, indent=2))
+    adjudication = run.grade("clean-control", unexpected)
+    (unexpected.parent / "result.json").write_text(json.dumps(adjudication, indent=2))
+    results.append({"case": "unexpected-control-finding", "passed":
+                    adjudication.get("assessment") == "requires-independent-adjudication"
+                    and adjudication["executable_checks_passed"] is None})
     print(json.dumps(results[-1]), flush=True)
     generated = destination / "reference-transfer"
     transfer.prepare(destination / "verifier-bypass/submission", generated)

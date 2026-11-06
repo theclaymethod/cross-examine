@@ -9,9 +9,13 @@ Attack an evaluation before trusting its scores. Seek a concrete counterexample:
 
 Before generating or reviewing an eval, read [confirmed design lessons](references/lessons.md) and apply those whose conditions match the task.
 
+Maintain an evidence ledger using [the ledger instructions](references/ledger.md). Reuse the eval project's existing ledger; otherwise create `WARGAMES_LEDGER.md` beside the eval. The ledger records what was prevented, what remains unverified, and whether the evaluation still measures its intended capability.
+
 ## Establish the game
 
 Read the task, environment setup and reset path, verifier, scoring rules, and any eval-generator instructions. State the intended capability and observable success independently of the verifier's implementation. If the intended outcome is ambiguous, resolve that ambiguity before declaring a shortcut illegitimate.
+
+Record the intended capability, permitted shortcuts, and out-of-scope claims in the ledger before attacking. Freeze the eval/grader version and the inputs for scored runs. If candidate output motivates changes, preserve the old result and label that run as development evidence; use a fresh candidate on the frozen revision for a held-out claim.
 
 Map what the evaluated agent can actually read, write, execute, and influence, including artifacts, processes, tools, network access, and persistent state. Separate evaluator-only assets from agent-accessible assets. Record the exact verifier entrypoint and how its result becomes a score.
 
@@ -54,6 +58,8 @@ Judge the candidate outcome against the task contract independently of the verif
 
 Merge duplicate findings by root cause. Explain the trust boundary or invalid assumption that made each confirmed flaw possible and what it does to score interpretation. A bounded search without findings establishes only what was attempted, not that the eval is secure.
 
+Audit the outer grader's intent too: can a candidate earn credit without supplying its own reproducer or promised learning artifact? Does a repair weaken the task or reject valid alternatives? Are seed labels overriding a genuine new defect? Distinguish artifact validation from discovery, swarm use, and learning; credit only what the evidence establishes. Route unforeseen confirmed findings to independent adjudication.
+
 ## Harden within scope
 
 When eval changes are authorized, fix the faulty assumption at its source. Prefer checking independently observable outcomes, protecting evaluator-owned state, isolating runs, and restoring reliable reset behavior over blacklisting one exploit's spelling.
@@ -77,4 +83,4 @@ Each lesson must explain:
 
 Promote only confirmed mechanisms into generation guidance. Keep conjectures in the findings report. For example, if a verifier accepts an agent-writable success flag, teach generators to measure the actual outcome through evaluator-owned evidence; banning that particular filename does not address the flaw.
 
-Finish with the confirmed findings and evidence, repairs and replay results, exact lesson files changed, and untested surfaces or unresolved limitations. Claim completion only for the attack budget and validation actually performed.
+Update the ledger after replay with original and repaired outcomes, legitimate-solution checks, and remaining limits. Finish with the intent verdict, confirmed findings and evidence, repairs and replay results, exact ledger/lesson files changed, and unresolved limitations. Claim completion only for the attack budget and validation actually performed.

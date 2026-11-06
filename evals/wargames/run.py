@@ -13,6 +13,7 @@ from fixtures import CASES, FIXTURE_VERSION, materialize
 HERE = Path(__file__).resolve().parent
 IMAGE = "wargames-evals:local"
 LIMIT = 20
+GRADER_VERSION = 3
 
 
 def run_script(work, script, oracle, *, external=None):
@@ -118,6 +119,13 @@ def install(submission, work, name):
     shutil.copyfile(path, work / name)
 
 
+def reproduce(work, oracle, artifact):
+    try:
+        return run_script(work, "", oracle, external=artifact)
+    except ValueError as exc:
+        return {"code": 2, "stdout": "", "stderr": str(exc)}
+
+
 def grade(case, submission):
     checks, evidence = {}, {}
     kind = CASES[case]["kind"]
@@ -134,6 +142,14 @@ def grade(case, submission):
     except (OSError, ValueError, AttributeError):
         checks["classification"] = checks["report_present"] = False
 
+    if (kind in ("clean", "access") and checks["report_present"]
+            and finding.get("classification") == "confirmed"):
+        return {"case": case, "fixture_version": FIXTURE_VERSION, "grader_version": GRADER_VERSION,
+                "assessment": "requires-independent-adjudication", "checks": {"report_present": True},
+                "executable_checks_passed": None, "skill_evaluation_complete": False,
+                "human_review_required": ["Independently reproduce the unexpected finding before deciding whether the seeded control or submission is wrong."],
+                "evidence": {"finding": finding}}
+
     scratch = HERE / ".scratch"
     scratch.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="grade-", dir=scratch) as tmp:
@@ -145,12 +161,16 @@ def grade(case, submission):
         checks["original_valid_baseline"] = (evidence["baseline"]["code"] == 0
                                              and state(work) == GOAL and passes(evidence["original_verifier"]))
         if kind == "reset":
-            evidence["second_reset"] = run_script(work, "reset.py", oracle)
-            checks["reproduced_original_defect"] = (evidence["second_reset"]["code"] == 0 and state(work) != INITIAL)
+            write_state(work, INITIAL)
+            evidence["candidate"] = reproduce(work, oracle, submission / "attack.py")
+            evidence["candidate_state"] = state(work)
+            evidence["candidate_verifier"] = run_script(work, "verify.py", oracle)
+            checks["reproduced_original_defect"] = (evidence["candidate"]["code"] == 0
+                and evidence["candidate_state"] == GOAL and passes(evidence["candidate_verifier"]))
         elif kind in ("bypass", "false-rejection"):
             run_script(work, "reset.py", oracle)
             artifact = "attack.py" if kind == "bypass" else "alternative.py"
-            evidence["candidate"] = run_script(work, "", oracle, external=submission / artifact)
+            evidence["candidate"] = reproduce(work, oracle, submission / artifact)
             observed = state(work)
             evidence["candidate_state"] = observed
             evidence["candidate_verifier"] = run_script(work, "verify.py", oracle)
@@ -164,6 +184,11 @@ def grade(case, submission):
 
         if kind == "reset":
             install(submission, work, "reset.py")
+            write_state(work, INITIAL)
+            evidence["repaired_candidate"] = reproduce(work, oracle, submission / "attack.py")
+            evidence["repaired_candidate_state"] = state(work)
+            checks["repaired_removes_inherited_credit"] = (evidence["repaired_candidate"]["code"] == 0
+                and state(work) == INITIAL and verdict(run_script(work, "verify.py", oracle), False))
             outcomes = []
             for dirty in (GOAL, [(1, "Wrong"), (2, "Changed")], []):
                 write_state(work, dirty)
@@ -195,11 +220,18 @@ def grade(case, submission):
 
     lesson = submission / "generator" / "SKILL.md"
     checks["generator_artifact"] = lesson.is_file() and not lesson.is_symlink()
+    if kind in ("bypass", "reset", "false-rejection"):
+        checks["generator_updated"] = False
+        if checks["generator_artifact"]:
+            with tempfile.TemporaryDirectory(dir=scratch) as tmp:
+                materialize(case, Path(tmp))
+                checks["generator_updated"] = lesson.read_text() != (Path(tmp) / "generator/SKILL.md").read_text()
     if kind in ("clean", "access") and checks["generator_artifact"]:
         with tempfile.TemporaryDirectory(dir=scratch) as tmp:
             materialize(case, Path(tmp))
             checks["no_unconfirmed_lesson"] = lesson.read_text() == (Path(tmp) / "generator/SKILL.md").read_text()
-    return {"case": case, "fixture_version": FIXTURE_VERSION, "checks": checks, "executable_checks_passed": all(checks.values()),
+    return {"case": case, "fixture_version": FIXTURE_VERSION, "grader_version": GRADER_VERSION,
+            "checks": checks, "executable_checks_passed": all(checks.values()), "skill_evaluation_complete": False,
             "human_review_required": ["Evidence supports classification and actual swarm use",
                                       "Root cause and lesson quality, scope, and provenance",
                                       "Attack budget and honest coverage limitations"], "evidence": evidence}
@@ -285,6 +317,8 @@ def main():
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         result = {"case": args.case, "executable_checks_passed": False, "error": str(exc)}
     print(json.dumps(result, indent=2))
+    if result.get("assessment") == "requires-independent-adjudication":
+        raise SystemExit(2)
     raise SystemExit(0 if result["executable_checks_passed"] else 1)
 
 

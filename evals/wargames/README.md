@@ -37,7 +37,7 @@ python3 run.py grade verifier-bypass /absolute/path/to/submission
 
 The grader creates a fresh fixture, replays submitted artifacts in containers, and independently reads database state. Container execution uses no network, a read-only root filesystem, read-only evaluator code and oracle mounts, resource limits, and a timeout. These controls apply to the runnable artifacts; the operator must separately enforce the audit agent's tool and filesystem access.
 
-The JSON result includes `checks`, evidence, `executable_checks_passed`, and the remaining human-review requirements. A nonzero exit indicates an executable grading failure. Preserve the JSON alongside the transcript.
+The JSON result includes `checks`, evidence, `executable_checks_passed`, and the remaining human-review requirements. Exit 1 indicates an executable grading failure. An unexpected confirmed finding in an intended clean/access control returns exit 2 and an unscored result for independent adjudication; the seed label is not proof the report is wrong. `skill_evaluation_complete` remains false because artifact checks do not establish discovery, swarm behavior, or lesson quality. Preserve the JSON alongside the transcript.
 
 ## Cases for the operator
 
@@ -53,19 +53,23 @@ An access-trap audit can legitimately conclude that no defect was confirmed with
 
 ## Measure lesson transfer separately
 
-After reviewing a confirmed-flaw submission, prepare a different-domain generation task using its revised generator skill:
+After reviewing a confirmed-flaw submission, prepare a related generation task using its revised generator skill:
 
 ```bash
 python3 transfer.py prepare /absolute/path/to/source-submission /absolute/path/to/transfer-output
 ```
 
-Give a fresh agent only the prepared transfer request, the revised generator skill, and its designated output space. Withhold the original audit, seeded flaw description, reference implementations, grader, and calibration outputs. Have it generate the requested evaluation, then grade the completed output:
+Give a fresh agent only the prepared transfer request, the revised generator skill, and its designated output space. The learned guidance may include confirmed examples and provenance from the original flaw; that is instructional input. Withhold the raw original audit, runnable source artifacts, target answers, grader, and calibration outputs. Have it generate the requested evaluation, then grade the completed output:
 
 ```bash
 python3 transfer.py grade /absolute/path/to/transfer-output
 ```
 
-This stage checks whether the lesson helps a new generator in a different task. A reference transfer submission calibrates that grader; it is not evidence of learning. Model audit effectiveness and model transfer effectiveness remain unmeasured until actual candidate runs and their reviews are recorded. For a causal comparison, run the same generation task with the original generator skill as a separate baseline under the same model and budget.
+This stage checks near transfer: both tasks update two-row SQLite state. It does not establish broader domain generalization. A reference transfer submission calibrates that grader; it is not evidence of learning. For a causal comparison, run the same generation task with the original generator skill as a separate baseline under the same model and budget. Freeze the grader before scored candidates run, keep operator-owned hashes of their inputs, and label runs used to revise the grader as development.
+
+## Keep the ledger
+
+[LEDGER.md](LEDGER.md) records confirmed mechanisms, bounded prevention evidence, and unresolved intent gaps. Update it after each review and replay; retain old results when a grader change invalidates an earlier interpretation. The skill's [ledger instructions](../../skills/wargames/references/ledger.md) define the evidence needed. See [INTENT_REVIEW.md](INTENT_REVIEW.md) for the review of what this suite actually measures.
 
 ## Complete the review
 

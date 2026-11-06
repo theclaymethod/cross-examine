@@ -25,6 +25,6 @@ See the [eval instructions](evals/wargames/README.md) for grading submissions, r
 
 ## What was verified
 
-All eight calibration checks passed. One fresh-context audit reproduced a verifier bypass and submitted working repairs; a second fresh-context agent used the resulting lessons to generate an evaluation in another domain. Both pilot outputs passed the executable grading checks.
+The original eight calibration checks passed. One development audit reproduced a verifier bypass and submitted working repairs; a second fresh-context agent used the resulting lessons to generate a related SQLite evaluation. Both pilot outputs passed their then-current executable grading checks. The subsequent [intent review](evals/wargames/INTENT_REVIEW.md) identified missing candidate-work requirements; grader version 3 adds those checks and three calibration cases.
 
-Those runs establish a successful trajectory, not a reliability estimate or causal improvement claim. Reasoning, lesson quality, and run provenance still require review. The [report](evals/wargames/REPORT.md) records the defects found, corrections, and limits. Machine-specific paths in published evidence are replaced with `<repo>`; generated SQLite state and local scratch outputs are excluded.
+Those runs establish a development trajectory, not a held-out result, broad transfer, reliability estimate, or causal improvement claim. Reasoning, lesson quality, and run provenance still require review. The [ledger](evals/wargames/LEDGER.md) records reward-hacking mechanisms and prevention evidence; the [report](evals/wargames/REPORT.md) records the original run. Machine-specific paths in published evidence are replaced with `<repo>`; generated SQLite state and local scratch outputs are excluded.

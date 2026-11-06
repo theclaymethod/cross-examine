@@ -1,5 +1,7 @@
 # Wargaming the wargames evals
 
+This is the historical development report. The later [intent review](INTENT_REVIEW.md) identifies gaps in its executable proxy and qualifies the pilot as development and near-transfer evidence. The [ledger](LEDGER.md) records corrections and open limitations; original results below retain their historical versions.
+
 The suite contains five audit cases and a separate fresh-agent lesson-transfer stage. The outer grader replays artifacts in restricted Docker containers and independently reads SQLite outcomes. Executable results are separate from the review of reasoning, provenance, and lesson quality.
 
 ## What changed after adversarial review
