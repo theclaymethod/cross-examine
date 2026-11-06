@@ -1,3 +1,21 @@
+# Moved to C Stack
+
+This standalone repository is retired. Use [C Stack](https://github.com/theclaymethod/cstack) for current development, installation, and updates.
+
+The [Cross-Examine skill](https://github.com/theclaymethod/cstack/tree/main/skills/cross-examine), [eval suite and evidence](https://github.com/theclaymethod/cstack/tree/main/evals/cross-examine), and expanded design lessons are maintained there. This repository preserves the original history for reproducing older runs.
+
+Install the current pack:
+
+```bash
+npx skills add theclaymethod/cstack \
+  --skill expert-mode distill-me create-eval run-eval cross-examine \
+  -a codex -a claude-code -a cursor --copy
+```
+
+The documentation below describes the historical standalone version.
+
+---
+
 # Cross-Examine
 
 A skill for proactively red-teaming agent evaluations: send a small adversarial swarm to find ways to earn credit without completing the intended task, reproduce confirmed flaws, repair the evaluation, and turn the findings into guidance for future eval generators.
